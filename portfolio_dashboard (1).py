@@ -187,7 +187,7 @@ def calculate_realized_pnl(transactions_df):
     return realized_pnl, pd.DataFrame(columns=["Date", "Cumulative Realized P&L"])
 
 
-# --- Get Watchlist Stock Info (Updated for Industry, Removed Sales Growth) ---
+# --- Get Watchlist Stock Info (Updated for Industry, Market Cap in Cr, Removed Sales Growth) ---
 @st.cache_data(ttl=900) 
 def get_watchlist_stock_info(symbol):
     try:
@@ -196,28 +196,32 @@ def get_watchlist_stock_info(symbol):
 
         data = {
             "Stock": symbol,
-            "Industry": info.get('industry'), # Added Industry
-            "Market Cap (₹)": info.get('marketCap'),
+            "Industry": info.get('industry'), 
+            "Market Cap (₹)": info.get('marketCap'), # Raw market cap
             "P/E Ratio": info.get('trailingPE'),
             "Current Price (₹)": info.get('regularMarketPrice'),
-            "% Day Chg": info.get('regularMarketChangePercent'),
+            "% Day Chg": info.get('regularMarketChangePercent'), # This is a decimal (e.g., 0.015)
             "EPS": info.get('trailingEps'),
-            # Removed "Sales Growth (QoQ %)"
-            "Profit Growth (QoQ %)": info.get('earningsQuarterlyGrowth'),
-            "ROE (%)": info.get('returnOnEquity'),
+            "Profit Growth (QoQ %)": info.get('earningsQuarterlyGrowth'), # This is a decimal (e.g., 0.05)
+            "ROE (%)": info.get('returnOnEquity'), # This is a decimal (e.g., 0.12)
             "Beta": info.get('beta'),
         }
 
-        # Convert percentages from decimal to actual percentage
+        # Convert percentages from decimal to actual percentage for display
         if data["% Day Chg"] is not None:
             data["% Day Chg"] *= 100
         if data["Profit Growth (QoQ %)"] is not None:
             data["Profit Growth (QoQ %)"] *= 100
         if data["ROE (%)"] is not None:
             data["ROE (%)"] *= 100
+        
+        # Convert Market Cap to Crores (1 Crore = 10,000,000)
+        if data["Market Cap (₹)"] is not None:
+            data["Market Cap (₹)"] = data["Market Cap (₹)"] / 10_000_000
 
         return data
     except Exception as e:
+        # st.warning(f"Could not fetch detailed info for {symbol}: {e}") # Debugging
         return {
             "Stock": symbol,
             "Industry": None,
@@ -231,7 +235,7 @@ def get_watchlist_stock_info(symbol):
             "Beta": None,
         }
 
-# --- Styling Function for Green/Red ---
+# --- Styling Function for Green/Red based on value ---
 def color_positive_negative(val):
     if isinstance(val, (int, float)):
         if val > 0:
@@ -503,7 +507,7 @@ with tab2: # Content for the "Transactions" tab
         edited_df = st.data_editor(
             editable_transactions_df, 
             use_container_width=True,
-            num_rows="dynamic", # Allows adding/deleting rows
+            num_rows="dynamic", 
             column_config={
                 "Date": st.column_config.DateColumn(format="YYYY-MM-DD"), 
                 "Quantity": st.column_config.NumberColumn(format="%d"),
@@ -586,13 +590,7 @@ with tab3: # Content for the "Watchlist" tab
         
         watchlist_df = pd.DataFrame(watchlist_data)
         
-        # Convert Market Cap to Crores
-        # Handle potential None values before division
-        watchlist_df["Market Cap (₹)"] = watchlist_df["Market Cap (₹)"].apply(
-            lambda x: x / 10_000_000 if pd.notna(x) else None
-        )
-        
-        # Set 'Stock' as index for data_editor
+        # Set 'Stock' as index for data_editor to allow row deletion directly
         watchlist_df = watchlist_df.set_index("Stock")
 
         # Reorder columns for better readability (removed Sales Growth, added Industry)
@@ -603,18 +601,21 @@ with tab3: # Content for the "Watchlist" tab
         watchlist_df = watchlist_df[display_columns]
 
         st.subheader("Current Watchlist Stocks")
+        
+        # Apply styling for formatting and colors
+        styled_watchlist_df = watchlist_df.style.format({
+            "Current Price (₹)": "₹{:,.2f}",
+            "Market Cap (₹)": "₹{:,.2f} Cr", # Formatted for Crores
+            "P/E Ratio": "{:,.2f}",
+            "% Day Chg": "{:,.2f}%",  # Should correctly show percentage
+            "EPS": "₹{:,.2f}",
+            "Profit Growth (QoQ %)": "{:,.2f}%",
+            "ROE (%)": "{:,.2f}%",
+            "Beta": "{:,.2f}"
+        }, na_rep="N/A").applymap(color_positive_negative, subset=["% Day Chg", "Profit Growth (QoQ %)"]) # Apply color here
+
         edited_watchlist_df = st.data_editor(
-            watchlist_df.style.format({
-                "Current Price (₹)": "₹{:,.2f}",
-                "Market Cap (₹)": "₹{:,.2f} Cr", # Formatted for Crores
-                "P/E Ratio": "{:,.2f}",
-                "% Day Chg": "{:,.2f}%",
-                "EPS": "₹{:,.2f}",
-                "Profit Growth (QoQ %)": "{:,.2f}%",
-                "ROE (%)": "{:,.2f}%",
-                "Beta": "{:,.2f}"
-            }, na_rep="N/A")
-            .applymap(color_positive_negative, subset=["% Day Chg", "Profit Growth (QoQ %)"]), # Apply color here
+            styled_watchlist_df, # Pass the styled DataFrame to data_editor
             use_container_width=True,
             num_rows="dynamic", # Allows adding/deleting rows
             key="watchlist_data_editor"
@@ -637,7 +638,6 @@ with tab3: # Content for the "Watchlist" tab
                 st.rerun()
             else:
                 # This block would handle manual edits to values, which are not currently processed beyond display
-                # For this app, we only care about additions/deletions via the editor.
                 pass 
     else:
         st.info("Your watchlist is empty. Add stocks using the input above.")
