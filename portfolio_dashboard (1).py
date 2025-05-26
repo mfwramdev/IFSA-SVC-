@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, date, timedelta
 import collections # For deque, a more efficient queue for FIFO
+import base64 # Needed if you want to use the Base64 method directly, but for clarity, we use the generated string.
 
 # Import the autorefresh component
 from streamlit_autorefresh import st_autorefresh
@@ -18,15 +19,13 @@ st_autorefresh(interval=60000, key="data_autorefresh")
 # --- PASTE YOUR GENERATED BASE64 STRING HERE ---
 # After running generate_base64.py, copy the very long string it prints
 # and paste it between the double quotes below.
-# Example (this is a placeholder, replace with your actual string):
+# REMEMBER TO REPLACE THIS WITH YOUR ACTUAL GENERATED BASE64 STRING!
+# This placeholder is for a 1x1 transparent pixel and won't show your logo.
 image_base64_data_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" 
-# REMEMBER TO REPLACE THE ABOVE STRING WITH YOUR ACTUAL GENERATED BASE64 STRING!
-# It will be much, much longer than this example.
 # --------------------------------------------------
 
 # --- Helper Functions (Cached) ---
 
-# Removed @st.cache_data from get_live_prices so it always fetches fresh data on app rerun
 def get_live_prices(tickers):
     if not tickers:
         return {}
@@ -36,10 +35,8 @@ def get_live_prices(tickers):
     for ticker_symbol in tickers_list:
         try:
             ticker = yf.Ticker(ticker_symbol)
-            # Use 'regularMarketPrice' for more up-to-the-minute data if available
             price = ticker.info.get('regularMarketPrice') 
             if price is None:
-                # Fallback to current day's close if regularMarketPrice is not immediately available
                 hist = ticker.history(period="1d")
                 if not hist.empty:
                     price = hist["Close"].iloc[-1]
@@ -53,58 +50,49 @@ def get_live_prices(tickers):
     return live_prices_dict
 
 
-@st.cache_data(ttl=86400) # Keep historical data cached for 24 hours (changes less frequently)
+@st.cache_data(ttl=86400) 
 def get_historical_prices(tickers, start_date, end_date):
     if not tickers:
         return pd.DataFrame()
     tickers_list = list(tickers) if not isinstance(tickers, list) else tickers
     
     try:
-        # yf.download handles multiple tickers efficiently
         data = yf.download(tickers_list, start=start_date, end=end_date, progress=False)
         if data.empty:
             return pd.DataFrame()
         
-        # If multiple tickers, 'Close' is a multi-level column, select all Close prices
         if isinstance(data.columns, pd.MultiIndex):
             return data['Close']
-        elif 'Close' in data.columns: # Single ticker
-            return data[['Close']] # Return as DataFrame for consistency
+        elif 'Close' in data.columns: 
+            return data[['Close']] 
         return pd.DataFrame()
     except Exception as e:
         st.error(f"Error fetching historical prices: {e}")
         return pd.DataFrame()
 
-# Function to validate and normalize Indian stock symbols
-@st.cache_data(ttl=3600) # Cache symbol validation for 1 hour
+@st.cache_data(ttl=3600) 
 def validate_indian_stock_symbol(symbol):
     if not symbol:
         return None, "Stock symbol cannot be empty."
 
-    # Try symbol as-is (e.g., if user already entered .NS or .BO)
     try:
         ticker = yf.Ticker(symbol)
-        # Check if info is available and if it's an Indian exchange
         if ticker.info and ticker.info.get('exchange') in ['NSE', 'BSE', 'NSI', 'BOM']:
             return symbol, None
     except:
-        pass # Continue to try other options
+        pass
 
-    # Try appending .NS (NSE)
     symbol_ns = f"{symbol}.NS"
     try:
         ticker = yf.Ticker(symbol_ns)
-        # Check for regularMarketPrice to ensure it's an active trading symbol
         if ticker.info and ticker.info.get('regularMarketPrice') and ticker.info.get('exchange') in ['NSE', 'NSI']:
             return symbol_ns, None
     except:
         pass
 
-    # Try appending .BO (BSE)
     symbol_bo = f"{symbol}.BO"
     try:
         ticker = yf.Ticker(symbol_bo)
-        # Check for regularMarketPrice to ensure it's an active trading symbol
         if ticker.info and ticker.info.get('regularMarketPrice') and ticker.info.get('exchange') in ['BSE', 'BOM']:
             return symbol_bo, None
     except:
@@ -112,7 +100,6 @@ def validate_indian_stock_symbol(symbol):
 
     return None, f"Could not find a valid Indian stock symbol for '{symbol}'. Please check the symbol or ensure it's listed on NSE/BSE. Try symbols like 'RELIANCE' or 'TCS.NS'."
 
-# Function to calculate current holdings (used for pre-sell checks and unrealized P&L)
 def calculate_current_holdings(transactions_df):
     holdings = collections.defaultdict(lambda: {"quantity": 0, "total_cost": 0})
     
@@ -133,7 +120,6 @@ def calculate_current_holdings(transactions_df):
                 holdings[stock]["quantity"] -= quantity
                 holdings[stock]["total_cost"] -= quantity * cost_per_share_before_sell
             
-            # Ensure holdings don't go negative or cost becomes negative for remaining shares
             if holdings[stock]["quantity"] < 0:
                 holdings[stock]["quantity"] = 0
                 holdings[stock]["total_cost"] = 0
@@ -151,8 +137,6 @@ def calculate_current_holdings(transactions_df):
             })
     return final_holdings_list
 
-
-# --- Realized P&L Calculation Logic (FIFO) ---
 def calculate_realized_pnl(transactions_df):
     realized_pnl = 0
     cost_basis_pool = collections.defaultdict(collections.deque)
@@ -190,10 +174,6 @@ def calculate_realized_pnl(transactions_df):
                 if oldest_buy['qty'] == 0:
                     cost_basis_pool[stock].popleft()
             
-            # Optional: warn if selling more than owned according to FIFO history
-            # if sell_qty_remaining > 0:
-            #     st.warning(f"Warning: Sold {quantity} shares of {stock} on {txn['Date'].date()}, but only {quantity - sell_qty_remaining} shares had a recorded purchase history. Realized P&L is calculated only for available shares under FIFO.")
-        
         daily_cumulative_pnl[transaction_date] = current_cumulative_pnl_snapshot
     
     if daily_cumulative_pnl:
@@ -216,8 +196,8 @@ def calculate_realized_pnl(transactions_df):
     return realized_pnl, pd.DataFrame(columns=["Date", "Cumulative Realized P&L"])
 
 
-# --- New Function: Get Watchlist Stock Info ---
-@st.cache_data(ttl=900) # Cache for 15 minutes, as these metrics don't change as fast as live price
+# --- New Function: Get Watchlist Stock Info (Updated for Industry, Removed Sales Growth) ---
+@st.cache_data(ttl=900) 
 def get_watchlist_stock_info(symbol):
     try:
         ticker = yf.Ticker(symbol)
@@ -225,14 +205,14 @@ def get_watchlist_stock_info(symbol):
 
         data = {
             "Stock": symbol,
+            "Industry": info.get('industry'), # Added Industry
             "Market Cap (₹)": info.get('marketCap'),
             "P/E Ratio": info.get('trailingPE'),
             "Current Price (₹)": info.get('regularMarketPrice'),
             "% Day Chg": info.get('regularMarketChangePercent'),
             "EPS": info.get('trailingEps'),
-            "Sales Growth (QoQ %)": info.get('revenueQuarterlyGrowth'),
+            # Removed "Sales Growth (QoQ %)"
             "Profit Growth (QoQ %)": info.get('earningsQuarterlyGrowth'),
-            # ROCE is not directly available in yfinance info. Using ROE as a proxy or leaving N/A.
             "ROE (%)": info.get('returnOnEquity'),
             "Beta": info.get('beta'),
         }
@@ -240,8 +220,6 @@ def get_watchlist_stock_info(symbol):
         # Convert percentages from decimal to actual percentage
         if data["% Day Chg"] is not None:
             data["% Day Chg"] *= 100
-        if data["Sales Growth (QoQ %)"] is not None:
-            data["Sales Growth (QoQ %)"] *= 100
         if data["Profit Growth (QoQ %)"] is not None:
             data["Profit Growth (QoQ %)"] *= 100
         if data["ROE (%)"] is not None:
@@ -251,16 +229,25 @@ def get_watchlist_stock_info(symbol):
     except Exception as e:
         return {
             "Stock": symbol,
+            "Industry": None,
             "Market Cap (₹)": None,
             "P/E Ratio": None,
             "Current Price (₹)": None,
             "% Day Chg": None,
             "EPS": None,
-            "Sales Growth (QoQ %)": None,
             "Profit Growth (QoQ %)": None,
             "ROE (%)": None,
             "Beta": None,
         }
+
+# --- Styling Function for Green/Red ---
+def color_positive_negative(val):
+    if isinstance(val, (int, float)):
+        if val > 0:
+            return 'color: green;'
+        elif val < 0:
+            return 'color: red;'
+    return '' # Default, no specific color
 
 # --- Initialize Session State ---
 if "transactions" not in st.session_state:
@@ -295,7 +282,7 @@ if st.sidebar.button("Add Transaction"):
             
             if quantity > held_qty:
                 st.sidebar.warning(f"You only hold {held_qty} shares of {normalized_stock_symbol}. Cannot sell {quantity}.")
-                st.stop() # Stop execution to prevent adding invalid transaction
+                st.stop() 
 
         new_transaction = pd.DataFrame({
             "Date": [input_date],
@@ -311,14 +298,12 @@ if st.sidebar.button("Add Transaction"):
         )
         st.sidebar.success(f"Added {action} of {quantity} {normalized_stock_symbol} at ₹{price:,.2f}")
         
-        # Clear specific caches that depend on transactions (historical data, symbol validation)
         get_historical_prices.clear()
         validate_indian_stock_symbol.clear()
         st.rerun()
 
 # --- Sidebar: Refresh and Clear options ---
 st.sidebar.markdown("---")
-# This button still triggers a full rerun, which will fetch new live prices
 if st.sidebar.button("Refresh Live Prices Now", type="primary"): 
     st.sidebar.success("Live prices refreshed!") 
     st.rerun()
@@ -328,22 +313,22 @@ if st.sidebar.button("Clear All Transactions", type="secondary"):
     st.session_state.transactions = pd.DataFrame(
         columns=["Date", "Stock", "Action", "Quantity", "Price"]
     )
-    st.session_state.transactions["Date"] = pd.to_datetime(st.session_state.transactions["Date"]) # Ensure type consistency
-    st.session_state.watchlist_stocks = [] # Also clear watchlist
+    st.session_state.transactions["Date"] = pd.to_datetime(st.session_state.transactions["Date"]) 
+    st.session_state.watchlist_stocks = [] 
     st.sidebar.success("All transactions and watchlist cleared.")
-    # Clear all caches, including historical data and symbol validation
-    st.cache_data.clear() # Clear all caches
+    st.cache_data.clear() 
     st.rerun()
 
 # --- Main Dashboard Title with Image (Using Base64) ---
-col_title, col_image = st.columns([0.8, 0.2]) # Adjust ratio as needed
+col_title, col_image = st.columns([0.8, 0.2]) 
 
 with col_title:
     st.title("Portfolio Tracker")
 
 with col_image:
     # Use the Base64 data URL here
-    st.image(image_base64_data_url, width=150) # Adjust width as needed
+    # REMINDER: MAKE SURE 'image_base64_data_url' CONTAINS YOUR ACTUAL GENERATED BASE64 STRING!
+    st.image(image_base64_data_url, width=150) 
 
 # --- Tabs for content organization ---
 tab1, tab2, tab3 = st.tabs(["Dashboard", "Transactions", "Watchlist"])
@@ -351,22 +336,21 @@ tab1, tab2, tab3 = st.tabs(["Dashboard", "Transactions", "Watchlist"])
 with tab1: # Content for the "Dashboard" tab
     if not st.session_state.transactions.empty:
         
-        # Calculate Realized P&L first using the dedicated function
         total_realized_pnl, realized_pnl_history_df = calculate_realized_pnl(st.session_state.transactions.copy())
 
         st.subheader("Realized Profit/Loss")
+        # Realized P&L: Use delta for color-coding, main value is the P&L itself
         st.metric(
             "Total Realized P&L",
             f"₹{total_realized_pnl:,.2f}",
-            delta_color="normal" 
+            delta=total_realized_pnl, # Pass the value itself as delta for color
+            delta_color="normal" # This makes positive green, negative red
         )
 
-        # Get current holdings using the new helper function
         holdings_list = calculate_current_holdings(st.session_state.transactions.copy())
         holdings_df = pd.DataFrame(holdings_list)
 
         if not holdings_df.empty:
-            # Make index start from 1
             holdings_df.index = holdings_df.index + 1
             
             st.subheader("Live Portfolio Performance (Unrealized)")
@@ -375,8 +359,6 @@ with tab1: # Content for the "Dashboard" tab
             live_prices = get_live_prices(unique_held_stocks) 
             
             holdings_df["Current Price"] = holdings_df["Stock"].map(live_prices)
-
-            # Fallback for current price if live price not fetched (e.g., market closed, error)
             holdings_df["Current Price"] = holdings_df["Current Price"].fillna(holdings_df["Avg Buy Price"])
             holdings_df["Current Price"] = holdings_df["Current Price"].fillna(0) 
 
@@ -389,6 +371,7 @@ with tab1: # Content for the "Dashboard" tab
                 axis=1
             )
 
+            # Apply conditional formatting for Unrealized P&L columns
             st.dataframe(
                 holdings_df.style.format({
                     "Avg Buy Price": "₹{:,.2f}",
@@ -397,7 +380,7 @@ with tab1: # Content for the "Dashboard" tab
                     "Current Value": "₹{:,.2f}",
                     "Unrealized P&L (₹)": "₹{:,.2f}",
                     "Unrealized P&L (%)": "{:,.2f}%"
-                }),
+                }).applymap(color_positive_negative, subset=["Unrealized P&L (₹)", "Unrealized P&L (%)"]),
                 use_container_width=True
             )
 
@@ -412,10 +395,12 @@ with tab1: # Content for the "Dashboard" tab
             with col2:
                 st.metric("Total Investment (Held)", f"₹{total_investment:,.2f}")
             with col3:
+                # Total Unrealized P&L: Use delta for color-coding
                 st.metric(
                     "Total Unrealized P&L",
                     f"₹{total_unrealized_pnl_dollars:,.2f}",
-                    delta=f"{total_unrealized_pnl_percent:,.2f}%"
+                    delta=f"{total_unrealized_pnl_percent:,.2f}%",
+                    delta_color="normal"
                 )
 
             st.subheader("Portfolio Growth Over Time (Unrealized)")
@@ -425,7 +410,6 @@ with tab1: # Content for the "Dashboard" tab
             
             all_traded_stocks = st.session_state.transactions["Stock"].unique().tolist()
             
-            # Fetch historical prices for all stocks involved in transactions
             all_historical_prices = get_historical_prices(
                 all_traded_stocks, 
                 min_transaction_date.strftime("%Y-%m-%d"), 
@@ -437,11 +421,9 @@ with tab1: # Content for the "Dashboard" tab
 
             portfolio_history_data = []
             
-            # Use a copy of transactions to avoid modifying the original during iteration
             temp_transactions_for_history = st.session_state.transactions.sort_values(by="Date").reset_index(drop=True)
             current_holdings_state_for_history = collections.defaultdict(lambda: {"quantity": 0, "total_cost": 0})
 
-            # Generate a full date range from the first transaction to today
             all_relevant_dates = sorted(list(set(
                 [t.date() for t in st.session_state.transactions["Date"]] + 
                 pd.date_range(start=min_transaction_date, end=max_today, freq='D').date.tolist()
@@ -449,7 +431,6 @@ with tab1: # Content for the "Dashboard" tab
 
             transaction_idx_for_history = 0
             for current_day in all_relevant_dates:
-                # Apply transactions that occurred on or before the current day
                 while transaction_idx_for_history < len(temp_transactions_for_history) and \
                       temp_transactions_for_history.iloc[transaction_idx_for_history]["Date"].date() <= current_day:
                     
@@ -464,15 +445,13 @@ with tab1: # Content for the "Dashboard" tab
                         current_holdings_state_for_history[stock]["total_cost"] += quantity * price
                     elif action == "Sell":
                         if current_holdings_state_for_history[stock]["quantity"] > 0:
-                            # Use FIFO logic for cost basis reduction
                             cost_per_share_before_sell = current_holdings_state_for_history[stock]["total_cost"] / current_holdings_state_for_history[stock]["quantity"]
                             current_holdings_state_for_history[stock]["quantity"] -= quantity
                             current_holdings_state_for_history[stock]["total_cost"] -= quantity * cost_per_share_before_sell
                         
-                        # Clean up if quantity drops to zero or below
                         if current_holdings_state_for_history[stock]["quantity"] <= 0:
                             current_holdings_state_for_history.pop(stock, None) 
-                        elif current_holdings_state_for_history[stock]["total_cost"] < 0: # Should not happen with correct FIFO, but as a safeguard
+                        elif current_holdings_state_for_history[stock]["total_cost"] < 0: 
                             current_holdings_state_for_history[stock]["total_cost"] = 0
                     
                     transaction_idx_for_history += 1
@@ -492,7 +471,6 @@ with tab1: # Content for the "Dashboard" tab
                             hist_price = all_historical_prices.loc[current_day, stock]
                         
                         if pd.isna(hist_price) or hist_price is None:
-                            # Try to find the most recent available price if current_day is a holiday/weekend
                             if stock in all_historical_prices.columns:
                                 valid_prices_for_stock = all_historical_prices[stock].dropna()
                                 relevant_prices = valid_prices_for_stock[valid_prices_for_stock.index <= current_day]
@@ -530,7 +508,7 @@ with tab1: # Content for the "Dashboard" tab
                 st.plotly_chart(fig, use_container_width=True)
             else:
                 st.info("Not enough data to plot portfolio growth. Add more transactions.")
-    else: # This else belongs to "if not st.session_state.transactions.empty"
+    else: 
         st.info("No transactions added yet. Use the sidebar to input trades and see your portfolio performance.")
 
 
@@ -548,23 +526,20 @@ with tab2: # Content for the "Transactions" tab
                 "Quantity": st.column_config.NumberColumn(format="%d"),
                 "Price": st.column_config.NumberColumn(format="₹%,.2f")
             },
-            key="transactions_data_editor_bottom" # Unique key for the widget
+            key="transactions_data_editor_bottom" 
         )
 
         if not edited_df.equals(editable_transactions_df):
             try:
-                # Ensure all required columns are present and typed correctly after editing
                 required_cols = ["Date", "Stock", "Action", "Quantity", "Price"]
                 if not all(col in edited_df.columns for col in required_cols):
                     st.error("Missing expected columns after editing. Please ensure all columns are present.")
                     st.stop()
 
-                # Basic validation for data types
                 edited_df["Date"] = pd.to_datetime(edited_df["Date"])
                 edited_df["Quantity"] = pd.to_numeric(edited_df["Quantity"], errors='coerce')
                 edited_df["Price"] = pd.to_numeric(edited_df["Price"], errors='coerce')
 
-                # Validate data content
                 if edited_df["Quantity"].isnull().any() or edited_df["Price"].isnull().any():
                     st.error("Quantity and Price must be valid numbers.")
                     st.stop()
@@ -585,7 +560,7 @@ with tab2: # Content for the "Transactions" tab
 
                 st.session_state.transactions = edited_df
                 st.success("Transactions updated successfully!")
-                st.cache_data.clear() # Clear all caches if transactions changed
+                st.cache_data.clear() 
                 st.rerun() 
             except Exception as e:
                 st.error(f"Error updating transactions: {e}. Please ensure 'Date' is in YYYY-MM-DD format, Quantity is a number, and Price is a number.")
@@ -609,7 +584,7 @@ with tab3: # Content for the "Watchlist" tab
                 elif normalized_symbol not in st.session_state.watchlist_stocks:
                     st.session_state.watchlist_stocks.append(normalized_symbol)
                     st.success(f"Added {normalized_symbol} to watchlist.")
-                    get_watchlist_stock_info.clear() # Clear cache for watchlist data to get new stock
+                    get_watchlist_stock_info.clear() 
                     st.rerun()
                 else:
                     st.info(f"{normalized_symbol} is already in your watchlist.")
@@ -618,7 +593,7 @@ with tab3: # Content for the "Watchlist" tab
 
     st.markdown("---")
 
-    # --- Display Watchlist ---
+    # --- Display Watchlist (Using st.data_editor for inline deletion) ---
     if st.session_state.watchlist_stocks:
         watchlist_data = []
         with st.spinner("Fetching watchlist data..."):
@@ -627,48 +602,53 @@ with tab3: # Content for the "Watchlist" tab
                 watchlist_data.append(info)
         
         watchlist_df = pd.DataFrame(watchlist_data)
+        
+        # Set 'Stock' as index for data_editor
         watchlist_df = watchlist_df.set_index("Stock")
 
-        # Reorder columns for better readability
+        # Reorder columns for better readability (removed Sales Growth, added Industry)
         display_columns = [
-            "Current Price (₹)", "% Day Chg", "Market Cap (₹)", "P/E Ratio", "EPS", 
-            "Sales Growth (QoQ %)", "Profit Growth (QoQ %)", "ROE (%)", "Beta"
+            "Industry", "Current Price (₹)", "% Day Chg", "Market Cap (₹)", "P/E Ratio", "EPS", 
+            "Profit Growth (QoQ %)", "ROE (%)", "Beta"
         ]
         watchlist_df = watchlist_df[display_columns]
 
-        st.dataframe(
+        st.subheader("Current Watchlist Stocks")
+        edited_watchlist_df = st.data_editor(
             watchlist_df.style.format({
                 "Current Price (₹)": "₹{:,.2f}",
-                "Market Cap (₹)": "₹{:,.0f}", # No decimals for Market Cap
+                "Market Cap (₹)": "₹{:,.0f}", 
                 "P/E Ratio": "{:,.2f}",
                 "% Day Chg": "{:,.2f}%",
                 "EPS": "₹{:,.2f}",
-                "Sales Growth (QoQ %)": "{:,.2f}%",
                 "Profit Growth (QoQ %)": "{:,.2f}%",
                 "ROE (%)": "{:,.2f}%",
                 "Beta": "{:,.2f}"
-            }, na_rep="N/A"), # Handle missing data gracefully
-            use_container_width=True
+            }, na_rep="N/A")
+            .applymap(color_positive_negative, subset=["% Day Chg", "Profit Growth (QoQ %)"]), # Apply color here
+            use_container_width=True,
+            num_rows="dynamic", # Allows adding/deleting rows
+            key="watchlist_data_editor"
         )
 
-        st.markdown("---")
-
-        # --- Remove Stock from Watchlist ---
-        st.subheader("Remove Stocks from Watchlist")
-        symbols_to_remove = st.multiselect(
-            "Select stocks to remove",
-            options=st.session_state.watchlist_stocks,
-            key="remove_watchlist_multiselect"
-        )
-        if st.button("Remove Selected", key="remove_watchlist_button"):
-            if symbols_to_remove:
-                st.session_state.watchlist_stocks = [
-                    s for s in st.session_state.watchlist_stocks if s not in symbols_to_remove
-                ]
-                st.success(f"Removed {len(symbols_to_remove)} stock(s) from watchlist.")
-                get_watchlist_stock_info.clear() # Clear cache for watchlist data as it changed
+        # Detect changes from the data_editor for deletions
+        if not edited_watchlist_df.equals(watchlist_df):
+            # Get the list of stocks from the edited dataframe's index
+            updated_stocks_list = edited_watchlist_df.index.tolist()
+            
+            # Check for deleted rows
+            if set(st.session_state.watchlist_stocks) != set(updated_stocks_list):
+                deleted_stocks = set(st.session_state.watchlist_stocks) - set(updated_stocks_list)
+                if deleted_stocks:
+                    st.success(f"Removed {len(deleted_stocks)} stock(s) from watchlist: {', '.join(deleted_stocks)}")
+                
+                # Update session state with the new list of stocks
+                st.session_state.watchlist_stocks = updated_stocks_list
+                get_watchlist_stock_info.clear() # Clear cache for watchlist data
                 st.rerun()
             else:
-                st.info("No stocks selected to remove.")
+                # This block would handle manual edits to values, which are not currently processed beyond display
+                # For this app, we only care about additions/deletions via the editor.
+                pass 
     else:
         st.info("Your watchlist is empty. Add stocks using the input above.")
