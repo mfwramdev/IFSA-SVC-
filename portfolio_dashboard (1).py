@@ -208,8 +208,6 @@ def get_watchlist_stock_info(symbol):
         }
 
         # Convert percentages from decimal to actual percentage for display
-        if data["% Day Chg"] is not None:
-            data["% Day Chg"] *= 100
         if data["Profit Growth (QoQ %)"] is not None:
             data["Profit Growth (QoQ %)"] *= 100
         if data["ROE (%)"] is not None:
