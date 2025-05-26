@@ -340,7 +340,7 @@ with col_title:
 with col_image:
     # Make sure 'portfolio_logo.png' is in the same directory as your script
     # Or replace with a direct URL to your image
-    st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/5/56/IFSA_Network_-_Logo_-_Square_-_Black_%26_White.png/500px-IFSA_Network_-_Logo_-_Square_-_Black_%26_White.png", width=150) # Adjust width as needed
+    st.image("portfolio_logo.png", width=150) # Adjust width as needed
 
 # --- Tabs for content organization ---
 tab1, tab2, tab3 = st.tabs(["Dashboard", "Transactions", "Watchlist"])
