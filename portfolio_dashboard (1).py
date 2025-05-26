@@ -4,7 +4,6 @@ import pandas as pd
 import plotly.express as px
 from datetime import datetime, date, timedelta
 import collections # For deque, a more efficient queue for FIFO
-import base64 # Needed if you want to use the Base64 method directly, but for clarity, we use the generated string.
 
 # Import the autorefresh component
 from streamlit_autorefresh import st_autorefresh
@@ -15,14 +14,6 @@ st.set_page_config(layout="wide", page_title="Portfolio Tracker")
 # --- Automatic Refresh Setup ---
 # Rerun the app every 60 seconds (60000 milliseconds)
 st_autorefresh(interval=60000, key="data_autorefresh")
-
-# --- PASTE YOUR GENERATED BASE64 STRING HERE ---
-# After running generate_base64.py, copy the very long string it prints
-# and paste it between the double quotes below.
-# REMEMBER TO REPLACE THIS WITH YOUR ACTUAL GENERATED BASE64 STRING!
-# This placeholder is for a 1x1 transparent pixel and won't show your logo.
-image_base64_data_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" 
-# --------------------------------------------------
 
 # --- Helper Functions (Cached) ---
 
@@ -196,7 +187,7 @@ def calculate_realized_pnl(transactions_df):
     return realized_pnl, pd.DataFrame(columns=["Date", "Cumulative Realized P&L"])
 
 
-# --- New Function: Get Watchlist Stock Info (Updated for Industry, Removed Sales Growth) ---
+# --- Get Watchlist Stock Info (Updated for Industry, Removed Sales Growth) ---
 @st.cache_data(ttl=900) 
 def get_watchlist_stock_info(symbol):
     try:
@@ -244,9 +235,9 @@ def get_watchlist_stock_info(symbol):
 def color_positive_negative(val):
     if isinstance(val, (int, float)):
         if val > 0:
-            return 'color: green;'
+            return 'color: green; font-weight: bold;'
         elif val < 0:
-            return 'color: red;'
+            return 'color: red; font-weight: bold;'
     return '' # Default, no specific color
 
 # --- Initialize Session State ---
@@ -319,16 +310,8 @@ if st.sidebar.button("Clear All Transactions", type="secondary"):
     st.cache_data.clear() 
     st.rerun()
 
-# --- Main Dashboard Title with Image (Using Base64) ---
-col_title, col_image = st.columns([0.8, 0.2]) 
-
-with col_title:
-    st.title("Portfolio Tracker")
-
-with col_image:
-    # Use the Base64 data URL here
-    # REMINDER: MAKE SURE 'image_base64_data_url' CONTAINS YOUR ACTUAL GENERATED BASE64 STRING!
-    st.image(image_base64_data_url, width=150) 
+# --- Main Dashboard Title (Image removed as requested) ---
+st.title("Portfolio Tracker")
 
 # --- Tabs for content organization ---
 tab1, tab2, tab3 = st.tabs(["Dashboard", "Transactions", "Watchlist"])
@@ -339,12 +322,12 @@ with tab1: # Content for the "Dashboard" tab
         total_realized_pnl, realized_pnl_history_df = calculate_realized_pnl(st.session_state.transactions.copy())
 
         st.subheader("Realized Profit/Loss")
-        # Realized P&L: Use delta for color-coding, main value is the P&L itself
+        # Realized P&L: Use delta for color-coding (positive green, negative red)
         st.metric(
             "Total Realized P&L",
             f"₹{total_realized_pnl:,.2f}",
-            delta=total_realized_pnl, # Pass the value itself as delta for color
-            delta_color="normal" # This makes positive green, negative red
+            delta=total_realized_pnl, 
+            delta_color="normal" 
         )
 
         holdings_list = calculate_current_holdings(st.session_state.transactions.copy())
@@ -395,7 +378,7 @@ with tab1: # Content for the "Dashboard" tab
             with col2:
                 st.metric("Total Investment (Held)", f"₹{total_investment:,.2f}")
             with col3:
-                # Total Unrealized P&L: Use delta for color-coding
+                # Total Unrealized P&L: Use delta for color-coding (positive green, negative red)
                 st.metric(
                     "Total Unrealized P&L",
                     f"₹{total_unrealized_pnl_dollars:,.2f}",
@@ -520,7 +503,7 @@ with tab2: # Content for the "Transactions" tab
         edited_df = st.data_editor(
             editable_transactions_df, 
             use_container_width=True,
-            num_rows="dynamic", 
+            num_rows="dynamic", # Allows adding/deleting rows
             column_config={
                 "Date": st.column_config.DateColumn(format="YYYY-MM-DD"), 
                 "Quantity": st.column_config.NumberColumn(format="%d"),
@@ -603,6 +586,12 @@ with tab3: # Content for the "Watchlist" tab
         
         watchlist_df = pd.DataFrame(watchlist_data)
         
+        # Convert Market Cap to Crores
+        # Handle potential None values before division
+        watchlist_df["Market Cap (₹)"] = watchlist_df["Market Cap (₹)"].apply(
+            lambda x: x / 10_000_000 if pd.notna(x) else None
+        )
+        
         # Set 'Stock' as index for data_editor
         watchlist_df = watchlist_df.set_index("Stock")
 
@@ -617,7 +606,7 @@ with tab3: # Content for the "Watchlist" tab
         edited_watchlist_df = st.data_editor(
             watchlist_df.style.format({
                 "Current Price (₹)": "₹{:,.2f}",
-                "Market Cap (₹)": "₹{:,.0f}", 
+                "Market Cap (₹)": "₹{:,.2f} Cr", # Formatted for Crores
                 "P/E Ratio": "{:,.2f}",
                 "% Day Chg": "{:,.2f}%",
                 "EPS": "₹{:,.2f}",
