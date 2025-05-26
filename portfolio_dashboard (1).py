@@ -187,7 +187,7 @@ def calculate_realized_pnl(transactions_df):
     return realized_pnl, pd.DataFrame(columns=["Date", "Cumulative Realized P&L"])
 
 
-# --- Get Watchlist Stock Info (Updated for Industry, Market Cap in Cr, Removed Sales Growth) ---
+# --- Get Watchlist Stock Info (Market Cap in Cr, Day Chg as %, Industry added) ---
 @st.cache_data(ttl=900) 
 def get_watchlist_stock_info(symbol):
     try:
@@ -221,7 +221,6 @@ def get_watchlist_stock_info(symbol):
 
         return data
     except Exception as e:
-        # st.warning(f"Could not fetch detailed info for {symbol}: {e}") # Debugging
         return {
             "Stock": symbol,
             "Industry": None,
@@ -358,7 +357,7 @@ with tab1: # Content for the "Dashboard" tab
                 axis=1
             )
 
-            # Apply conditional formatting for Unrealized P&L columns
+            # Apply conditional formatting for Unrealized P&L columns using .map()
             st.dataframe(
                 holdings_df.style.format({
                     "Avg Buy Price": "₹{:,.2f}",
@@ -367,7 +366,7 @@ with tab1: # Content for the "Dashboard" tab
                     "Current Value": "₹{:,.2f}",
                     "Unrealized P&L (₹)": "₹{:,.2f}",
                     "Unrealized P&L (%)": "{:,.2f}%"
-                }).applymap(color_positive_negative, subset=["Unrealized P&L (₹)", "Unrealized P&L (%)"]),
+                }).map(color_positive_negative, subset=["Unrealized P&L (₹)", "Unrealized P&L (%)"]),
                 use_container_width=True
             )
 
@@ -580,7 +579,7 @@ with tab3: # Content for the "Watchlist" tab
 
     st.markdown("---")
 
-    # --- Display Watchlist (Using st.data_editor for inline deletion) ---
+    # --- Display Watchlist (Using st.dataframe for guaranteed styling) ---
     if st.session_state.watchlist_stocks:
         watchlist_data = []
         with st.spinner("Fetching watchlist data..."):
@@ -590,10 +589,10 @@ with tab3: # Content for the "Watchlist" tab
         
         watchlist_df = pd.DataFrame(watchlist_data)
         
-        # Set 'Stock' as index for data_editor to allow row deletion directly
+        # Set 'Stock' as index for display purposes
         watchlist_df = watchlist_df.set_index("Stock")
 
-        # Reorder columns for better readability (removed Sales Growth, added Industry)
+        # Reorder columns for better readability
         display_columns = [
             "Industry", "Current Price (₹)", "% Day Chg", "Market Cap (₹)", "P/E Ratio", "EPS", 
             "Profit Growth (QoQ %)", "ROE (%)", "Beta"
@@ -602,42 +601,45 @@ with tab3: # Content for the "Watchlist" tab
 
         st.subheader("Current Watchlist Stocks")
         
-        # Apply styling for formatting and colors
+        # Apply styling for formatting and colors using .style and .map()
         styled_watchlist_df = watchlist_df.style.format({
             "Current Price (₹)": "₹{:,.2f}",
             "Market Cap (₹)": "₹{:,.2f} Cr", # Formatted for Crores
             "P/E Ratio": "{:,.2f}",
-            "% Day Chg": "{:,.2f}%",  # Should correctly show percentage
+            "% Day Chg": "{:,.2f}%",  # Correctly show percentage
             "EPS": "₹{:,.2f}",
             "Profit Growth (QoQ %)": "{:,.2f}%",
             "ROE (%)": "{:,.2f}%",
             "Beta": "{:,.2f}"
-        }, na_rep="N/A").applymap(color_positive_negative, subset=["% Day Chg", "Profit Growth (QoQ %)"]) # Apply color here
+        }, na_rep="N/A").map(color_positive_negative, subset=["% Day Chg", "Profit Growth (QoQ %)"]) # Apply color here
 
-        edited_watchlist_df = st.data_editor(
-            styled_watchlist_df, # Pass the styled DataFrame to data_editor
-            use_container_width=True,
-            num_rows="dynamic", # Allows adding/deleting rows
-            key="watchlist_data_editor"
+        st.dataframe(
+            styled_watchlist_df, # Pass the styled DataFrame
+            use_container_width=True
         )
 
-        # Detect changes from the data_editor for deletions
-        if not edited_watchlist_df.equals(watchlist_df):
-            # Get the list of stocks from the edited dataframe's index
-            updated_stocks_list = edited_watchlist_df.index.tolist()
-            
-            # Check for deleted rows
-            if set(st.session_state.watchlist_stocks) != set(updated_stocks_list):
-                deleted_stocks = set(st.session_state.watchlist_stocks) - set(updated_stocks_list)
-                if deleted_stocks:
-                    st.success(f"Removed {len(deleted_stocks)} stock(s) from watchlist: {', '.join(deleted_stocks)}")
-                
-                # Update session state with the new list of stocks
-                st.session_state.watchlist_stocks = updated_stocks_list
-                get_watchlist_stock_info.clear() # Clear cache for watchlist data
-                st.rerun()
-            else:
-                # This block would handle manual edits to values, which are not currently processed beyond display
-                pass 
+        st.markdown("---")
+
+        # --- Remove Stock from Watchlist (Separate Section for clarity and reliability) ---
+        st.subheader("Remove Stocks from Watchlist")
+        # Use a form to group the multiselect and button for better interaction
+        with st.form("remove_watchlist_form"):
+            symbols_to_remove = st.multiselect(
+                "Select stocks to remove from watchlist",
+                options=st.session_state.watchlist_stocks,
+                key="remove_watchlist_multiselect"
+            )
+            submitted = st.form_submit_button("Remove Selected Stocks")
+
+            if submitted:
+                if symbols_to_remove:
+                    st.session_state.watchlist_stocks = [
+                        s for s in st.session_state.watchlist_stocks if s not in symbols_to_remove
+                    ]
+                    st.success(f"Removed {len(symbols_to_remove)} stock(s) from watchlist.")
+                    get_watchlist_stock_info.clear() # Clear cache for watchlist data
+                    st.rerun()
+                else:
+                    st.info("No stocks selected to remove.")
     else:
         st.info("Your watchlist is empty. Add stocks using the input above.")
