@@ -13,9 +13,16 @@ st.set_page_config(layout="wide", page_title="Portfolio Tracker")
 
 # --- Automatic Refresh Setup ---
 # Rerun the app every 60 seconds (60000 milliseconds)
-# This will trigger the app to re-execute.
-# IMPORTANT: Be mindful of yfinance rate limits if running for long periods.
 st_autorefresh(interval=60000, key="data_autorefresh")
+
+# --- PASTE YOUR GENERATED BASE64 STRING HERE ---
+# After running generate_base64.py, copy the very long string it prints
+# and paste it between the double quotes below.
+# Example (this is a placeholder, replace with your actual string):
+image_base64_data_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" 
+# REMEMBER TO REPLACE THE ABOVE STRING WITH YOUR ACTUAL GENERATED BASE64 STRING!
+# It will be much, much longer than this example.
+# --------------------------------------------------
 
 # --- Helper Functions (Cached) ---
 
@@ -40,10 +47,8 @@ def get_live_prices(tickers):
             if price is not None:
                 live_prices_dict[ticker_symbol] = price
             else:
-                # st.info(f"Could not fetch live price for {ticker_symbol}. Using 0 for now.") # Removed to reduce clutter
                 live_prices_dict[ticker_symbol] = 0 # Fallback
         except Exception as e:
-            # st.info(f"Error fetching live price for {ticker_symbol}: {e}. Using 0 for now.") # Removed to reduce clutter
             live_prices_dict[ticker_symbol] = 0 # Fallback
     return live_prices_dict
 
@@ -244,7 +249,6 @@ def get_watchlist_stock_info(symbol):
 
         return data
     except Exception as e:
-        # st.warning(f"Could not fetch detailed info for {symbol}: {e}") # Removed to reduce clutter
         return {
             "Stock": symbol,
             "Market Cap (₹)": None,
@@ -331,16 +335,15 @@ if st.sidebar.button("Clear All Transactions", type="secondary"):
     st.cache_data.clear() # Clear all caches
     st.rerun()
 
-# --- Main Dashboard Title with Image ---
+# --- Main Dashboard Title with Image (Using Base64) ---
 col_title, col_image = st.columns([0.8, 0.2]) # Adjust ratio as needed
 
 with col_title:
     st.title("Portfolio Tracker")
 
 with col_image:
-    # Make sure 'portfolio_logo.png' is in the same directory as your script
-    # Or replace with a direct URL to your image
-    st.image("portfolio_logo.png", width=150) # Adjust width as needed
+    # Use the Base64 data URL here
+    st.image(image_base64_data_url, width=150) # Adjust width as needed
 
 # --- Tabs for content organization ---
 tab1, tab2, tab3 = st.tabs(["Dashboard", "Transactions", "Watchlist"])
@@ -363,7 +366,7 @@ with tab1: # Content for the "Dashboard" tab
         holdings_df = pd.DataFrame(holdings_list)
 
         if not holdings_df.empty:
-            # FIX: Make index start from 1
+            # Make index start from 1
             holdings_df.index = holdings_df.index + 1
             
             st.subheader("Live Portfolio Performance (Unrealized)")
